@@ -1,4 +1,4 @@
-name: Deploy OpenAPI to WSO2
+name: Desplegar OpenAPI en WSO2
 
 on:
   push:
@@ -8,33 +8,48 @@ on:
 
 jobs:
   deploy:
+    # Usa un ejecutor Ubuntu, que por defecto es x86_64
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
+    - name: Clonar Repositorio
+      # checkout@v3 es una acción común para obtener tu código
       uses: actions/checkout@v3
 
-    - name: Install apictl (ARM64)
+    - name: Instalar apictl (x64)
       run: |
-        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-arm64.tar.gz
-        tar -xzf apictl-4.3.3-linux-arm64.tar.gz
-        sudo install -m 755 apictl /usr/local/bin/apictl
+        # Descargar la versión de apictl para Linux x64 (compatible con el ejecutor)
+        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-x64.tar.gz
+        # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'
+        tar -xzf apictl-4.3.3-linux-x64.tar.gz
+        # Instalar el archivo ejecutable 'apictl' (que está dentro de la carpeta 'apictl')
+        # en /usr/local/bin y darle permisos de ejecución.
+        sudo install -m 755 apictl/apictl /usr/local/bin/apictl
 
-    - name: Add WSO2 Environment
+    - name: Añadir Entorno WSO2
       run: |
+        # Configura tu entorno WSO2 APIM. Ajusta las URLs si es necesario.
+        # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
         apictl add-env -e dev-env \
           --apim https://localhost:9443 \
           --token https://localhost:9443/oauth2/token \
           --insecure
 
-    - name: Login to WSO2 APIM
+    - name: Iniciar Sesión en WSO2 APIM
+      # Inicia sesión usando tus secretos de GitHub para el usuario y contraseña
+      # Asegúrate de que APIM_USER y APIM_PASS estén configurados en Settings -> Secrets
+      # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
       run: apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }} --insecure
 
-    - name: Deploy all OpenAPI definitions
+    - name: Desplegar todas las definiciones OpenAPI
       run: |
+        # Recorre todas las subcarpetas dentro de 'apis' (ej: apis/mi-api/v1)
         for dir in apis/*/*; do
+          # Verifica si existe un archivo api.yaml en esa subcarpeta
           if [ -f "$dir/api.yaml" ]; then
             echo "Importando $dir/api.yaml"
+            # Importa la API usando apictl. --update actualizará si ya existe.
+            # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
             apictl import-api -f "$dir" -e dev-env --update --insecure
           fi
         done
