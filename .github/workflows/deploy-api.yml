@@ -18,25 +18,28 @@ jobs:
       # checkout@v3 es una acción estándar para obtener tu código del repositorio
       uses: actions/checkout@v3
 
-    - name: Instalar apictl (x64 v4.2.6)
+    - name: Instalar apictl (amd64 v4.3.3)
       run: |
-        # --- CORRECCIÓN: ASEGURAR CONSISTENCIA EN EL NOMBRE DE ARCHIVO Y USAR V4.2.6 ---
-        DOWNLOAD_FILE="apictl-4.2.6-linux-x64.tar.gz"
+        # --- AJUSTADO PARA USAR LA VERSIÓN V4.3.3 Y NOMBRE DE ARCHIVO AMD64 ---
+        DOWNLOAD_FILE="apictl-4.3.3-linux-amd64.tar.gz"
         APIC_FOLDER="apictl" # La carpeta que se crea al descomprimir
 
-        echo "Descargando $DOWNLOAD_FILE ..."
+        echo "Descargando $DOWNLOAD_FILE desde v4.3.3..."
         # Descargar el archivo .tar.gz usando curl.
-        # Usamos la versión v4.2.6 y el nombre de archivo x64 que sabemos que existe.
-        curl -L -f -o "$DOWNLOAD_FILE" https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/"$DOWNLOAD_FILE"
+        # Usamos la URL que parece haber funcionado para descargar el archivo con nombre amd64.
+        # -L: Sigue redirecciones.
+        # -o: Especifica el nombre del archivo de salida.
+        # -f: Hace que curl falle con un código de error si la respuesta HTTP indica un error (ej: 404 Not Found).
+        curl -L -f -o "$DOWNLOAD_FILE" https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$DOWNLOAD_FILE"
 
         echo "Descomprimiendo el archivo $DOWNLOAD_FILE ..."
-        # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'.
+        # Descomprimir el archivo tar.gz. Usamos el mismo nombre de archivo descargado.
+        # Esto creará una carpeta llamada 'apictl'.
         tar -xzf "$DOWNLOAD_FILE"
 
         echo "Instalando el ejecutable apictl desde la carpeta $APIC_FOLDER ..."
         # Instalar el archivo ejecutable 'apictl' (que está dentro de la carpeta 'apictl')
         # en /usr/local/bin y darle permisos de ejecución.
-        # La corrección clave es usar la ruta dentro de la carpeta descomprimida.
         sudo install -m 755 "$APIC_FOLDER"/apictl /usr/local/bin/apictl
 
         echo "apictl instalado correctamente."
