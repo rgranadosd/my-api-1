@@ -6,5 +6,6 @@ paths:
   /hello:
     get:
       summary: Say, hello world!
+      responses:
         '200':
           description: OK
