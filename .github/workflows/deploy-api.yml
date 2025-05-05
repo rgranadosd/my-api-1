@@ -14,26 +14,36 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Install apictl
+    - name: Install apictl (ARM/x64)
       run: |
-        wget https://github.com/wso2/apictl/releases/latest/download/apictl-linux-x64 -O apictl
-        chmod +x apictl
-        sudo mv apictl /usr/local/bin/apictl
+        ARCH=$(uname -m)
+        VERSION=4.3.3
+        if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+          FILE=apictl-${VERSION}-linux-arm64.tar.gz
+        else
+          FILE=apictl-${VERSION}-linux-x64.tar.gz
+        fi
+        echo "Descargando $FILE"
+        wget https://github.com/wso2/product-apim-tooling/releases/download/v${VERSION}/$FILE
+        tar -xzf $FILE
+        chmod +x apictl-${VERSION}-*/apictl
+        sudo mv apictl-${VERSION}-*/apictl /usr/local/bin/apictl
 
     - name: Add WSO2 Environment
       run: |
         apictl add-env -e dev-env \
           --apim https://localhost:9443 \
-          --token https://localhost:9443/oauth2/token
+          --token https://localhost:9443/oauth2/token \
+          --insecure
 
     - name: Login to WSO2 APIM
-      run: apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }}
+      run: apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }} --insecure
 
     - name: Deploy all OpenAPI definitions
       run: |
         for dir in apis/*/*; do
           if [ -f "$dir/api.yaml" ]; then
             echo "Importando $dir/api.yaml"
-            apictl import-api -f "$dir" -e dev-env --update
+            apictl import-api -f "$dir" -e dev-env --update --insecure
           fi
         done
