@@ -24,9 +24,10 @@ jobs:
         # Descargar el archivo .tar.gz usando curl.
         # -L: Sigue redirecciones.
         # -o: Especifica el nombre del archivo de salida.
+        # -f: Hace que curl falle con un código de error si la respuesta HTTP indica un error (ej: 404 Not Found).
         # Asegúrate de que esta URL sea correcta y que la versión (v4.2.6) y el archivo (apictl-4.2.6-linux-x64.tar.gz)
-        # existan en las releases de WSO2 en GitHub.
-        curl -L -o apictl-4.2.6-linux-x64.tar.gz https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/apictl-4.2.6-linux-x64.tar.gz
+        # existan y sean accesibles en las releases de WSO2 en GitHub en el momento de la ejecución.
+        curl -L -f -o apictl-4.2.6-linux-x64.tar.gz https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/apictl-4.2.6-linux-x64.tar.gz
 
         echo "Descomprimiendo el archivo..."
         # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'.
