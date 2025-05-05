@@ -13,12 +13,12 @@ jobs:
     steps:
     - name: Checkout
       uses: actions/checkout@v3
-    
+
     - name: Install apictl (ARM64)
       run: |
         wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-arm64.tar.gz
         tar -xzf apictl-4.3.3-linux-arm64.tar.gz
-        sudo install -m 755 apictl/apictl /usr/local/bin/apictl
+        sudo install -m 755 apictl /usr/local/bin/apictl
 
     - name: Add WSO2 Environment
       run: |
@@ -37,4 +37,4 @@ jobs:
             echo "Importando $dir/api.yaml"
             apictl import-api -f "$dir" -e dev-env --update --insecure
           fi
-        done!
+        done
