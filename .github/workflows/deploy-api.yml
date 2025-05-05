@@ -1,0 +1,38 @@
+name: Deploy OpenAPI to WSO2
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'apis/**'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v3
+
+    - name: Install apictl
+      run: |
+        wget https://github.com/wso2/apictl/releases/download/v4.2.0/apictl-linux-amd64 -O apictl
+        chmod +x apictl
+        sudo mv apictl /usr/local/bin/apictl
+
+    - name: Add WSO2 Environment
+      run: |
+        apictl add-env -e dev-env \
+          --apim https://api.dev.local:9443 \
+          --token https://api.dev.local:9443/oauth2/token
+
+    - name: Login to WSO2 APIM
+      run: apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }}
+
+    - name: Deploy all OpenAPI definitions
+      run: |
+        for dir in apis/*/*; do
+          if [ -f "$dir/api.yaml" ]; then
+            apictl import-api -f "$dir" -e dev-env --update
+          fi
+        done
