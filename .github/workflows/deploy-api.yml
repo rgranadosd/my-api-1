@@ -16,10 +16,9 @@ jobs:
 
     - name: Install apictl (ARM64)
       run: |
-        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-arm64.tar.gz -O apictl.tar.gz
+        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-arm64.tar.gz
         tar -xzf apictl-4.3.3-linux-arm64.tar.gz
-        chmod +x apictl-4.3.3-linux-arm64/apictl
-        sudo mv apictl-4.3.3-linux-arm64/apictl /usr/local/bin/apictl
+        sudo install -m 755 apictl-4.3.3-linux-arm64/apictl /usr/local/bin/apictl
 
     - name: Add WSO2 Environment
       run: |
