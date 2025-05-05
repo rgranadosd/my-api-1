@@ -3,54 +3,83 @@ name: Desplegar OpenAPI en WSO2
 on:
   push:
     branches: [ main ]
+    # Este workflow se ejecutará cuando haya cambios en cualquier archivo dentro de la carpeta 'apis'
     paths:
       - 'apis/**'
 
 jobs:
   deploy:
-    # Usa un ejecutor Ubuntu, que por defecto es x86_64
+    # Este job se ejecutará en un ejecutor virtual de Ubuntu
+    # ubuntu-latest por defecto usa la arquitectura x86_64
     runs-on: ubuntu-latest
 
     steps:
     - name: Clonar Repositorio
-      # checkout@v3 es una acción común para obtener tu código
+      # checkout@v3 es una acción estándar para obtener tu código del repositorio
       uses: actions/checkout@v3
 
     - name: Instalar apictl (x64 v4.2.6)
       run: |
-        # --- CORRECCIÓN: USAR VERSIÓN EXISTENTE (v4.2.6) Y DESCARGAR X64 ---
-        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/apictl-4.2.6-linux-x64.tar.gz
-        # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'
+        echo "Descargando apictl versión v4.2.6 para Linux x64..."
+        # Descargar el archivo .tar.gz usando curl.
+        # -L: Sigue redirecciones.
+        # -o: Especifica el nombre del archivo de salida.
+        # Asegúrate de que esta URL sea correcta y que la versión (v4.2.6) y el archivo (apictl-4.2.6-linux-x64.tar.gz)
+        # existan en las releases de WSO2 en GitHub.
+        curl -L -o apictl-4.2.6-linux-x64.tar.gz https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/apictl-4.2.6-linux-x64.tar.gz
+
+        echo "Descomprimiendo el archivo..."
+        # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'.
         tar -xzf apictl-4.2.6-linux-x64.tar.gz
+
+        echo "Instalando el ejecutable apictl..."
         # Instalar el archivo ejecutable 'apictl' (que está dentro de la carpeta 'apictl')
         # en /usr/local/bin y darle permisos de ejecución.
-        # --- ESTA LÍNEA TAMBIÉN SE CORRIGIÓ EN LA RESPUESTA ANTERIOR ---
+        # La corrección clave es usar 'apictl/apictl' para apuntar al archivo dentro de la carpeta.
         sudo install -m 755 apictl/apictl /usr/local/bin/apictl
+
+        echo "apictl instalado correctamente."
+        # Verificar la versión instalada (opcional)
+        apictl version
+
 
     - name: Añadir Entorno WSO2
       run: |
+        echo "Añadiendo entorno WSO2 dev-env..."
         # Configura tu entorno WSO2 APIM. Ajusta las URLs si es necesario.
-        # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
+        # --insecure se usa para ignorar errores de certificado SSL (NO recomendado en producción, solo para pruebas)
         apictl add-env -e dev-env \
           --apim https://localhost:9443 \
           --token https://localhost:9443/oauth2/token \
           --insecure
+        echo "Entorno WSO2 añadido."
 
     - name: Iniciar Sesión en WSO2 APIM
-      # Inicia sesión usando tus secretos de GitHub para el usuario y contraseña
-      # Asegúrate de que APIM_USER y APIM_PASS estén configurados en Settings -> Secrets
-      # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
-      run: apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }} --insecure
+      run: |
+        echo "Iniciando sesión en WSO2 APIM..."
+        # Inicia sesión usando tus secretos de GitHub para el usuario y contraseña
+        # Asegúrate de que ${{ secrets.APIM_USER }} y ${{ secrets.APIM_PASS }}
+        # estén configurados en los secretos de tu repositorio (Settings -> Secrets -> Actions)
+        # --insecure se usa para ignorar errores de certificado SSL (NO recomendado en producción)
+        apictl login dev-env -u ${{ secrets.APIM_USER }} -p ${{ secrets.APIM_PASS }} --insecure
+        echo "Sesión iniciada."
 
     - name: Desplegar todas las definiciones OpenAPI
       run: |
-        # Recorre todas las subcarpetas dentro de 'apis' (ej: apis/mi-api/v1)
+        echo "Buscando definiciones OpenAPI para desplegar..."
+        # Recorre todas las subcarpetas dentro de 'apis' (se asume una estructura como apis/NombreAPI/Version)
         for dir in apis/*/*; do
-          # Verifica si existe un archivo api.yaml en esa subcarpeta
-          if [ -f "$dir/api.yaml" ]; then
-            echo "Importando $dir/api.yaml"
-            # Importa la API usando apictl. --update actualizará si ya existe.
-            # --insecure se usa para ignorar errores de certificado (no recomendado en producción)
+          # Verifica si esa subcarpeta es un directorio y si contiene un archivo api.yaml
+          if [ -d "$dir" ] && [ -f "$dir/api.yaml" ]; then
+            echo "Encontrada definición en: $dir"
+            echo "Importando API desde $dir/api.yaml..."
+            # Importa la API usando apictl.
+            # -f "$dir": Especifica la ruta a la carpeta que contiene api.yaml y otros archivos relacionados.
+            # -e dev-env: Especifica el entorno configurado previamente.
+            # --update: Actualiza la API si ya existe.
+            # --insecure: Para ignorar errores de certificado (NO recomendado en producción).
             apictl import-api -f "$dir" -e dev-env --update --insecure
+            echo "Importación de API desde $dir completada."
           fi
         done
+        echo "Proceso de despliegue de OpenAPI finalizado."
