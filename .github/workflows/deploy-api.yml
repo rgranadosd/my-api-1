@@ -52,10 +52,10 @@ jobs:
         echo "Añadiendo entorno WSO2 dev-env..."
         # Configura tu entorno WSO2 APIM. Ajusta las URLs si es necesario.
         # --insecure se usa para ignorar errores de certificado SSL (NO recomendado en producción, solo para pruebas)
-        apictl add-env -e dev-env \
-          --apim https://localhost:9443 \
-          --token https://localhost:9443/oauth2/token \
-          --insecure
+        apictl add env dev-env \
+            --apim https://localhost:9443 \
+            --token https://localhost:9443/oauth2/token \
+            --insecure
         echo "Entorno WSO2 añadido."
 
     - name: Iniciar Sesión en WSO2 APIM
