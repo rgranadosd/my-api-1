@@ -18,7 +18,7 @@ jobs:
       run: |
         # URL de descarga para WSO2 API Controller (apictl) v4.3.3 para Linux x64 (amd64)
         # Obtenida de https://github.com/wso2/product-apim-tooling/releases/
-        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-x64.tar.gz
+        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-amd64.tar.gz
         
         # Extraer el contenido del archivo tar.gz. Esto crea un directorio llamado 'apictl'.
         tar -xzf apictl-4.3.3-linux-x64.tar.gz
