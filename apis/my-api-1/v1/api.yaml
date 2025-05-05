@@ -1,0 +1,11 @@
+openapi: 3.0.1
+info:
+  title: my-api-1
+  version: v1
+paths:
+  /hello:
+    get:
+      summary: Say hello
+      responses:
+        '200':
+          description: OK

@@ -1,0 +1,4 @@
+name: my-api-1
+version: v1
+context: /my-api-1
+provider: admin
