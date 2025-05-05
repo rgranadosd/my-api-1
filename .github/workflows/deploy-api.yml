@@ -17,7 +17,7 @@ jobs:
     - name: Install apictl
       run: |
         wget https://github.com/wso2/apictl/releases/download/v4.1.1/apictl-linux-amd64 -O apictl
-	chmod +x apictl
+        chmod +x apictl
         sudo mv apictl /usr/local/bin/apictl
 
     - name: Add WSO2 Environment
