@@ -16,14 +16,15 @@ jobs:
       # checkout@v3 es una acción común para obtener tu código
       uses: actions/checkout@v3
 
-    - name: Instalar apictl (x64)
+    - name: Instalar apictl (x64 v4.2.6)
       run: |
-        # Descargar la versión de apictl para Linux x64 (compatible con el ejecutor)
-        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/apictl-4.3.3-linux-x64.tar.gz
+        # --- CORRECCIÓN: USAR VERSIÓN EXISTENTE (v4.2.6) Y DESCARGAR X64 ---
+        wget https://github.com/wso2/product-apim-tooling/releases/download/v4.2.6/apictl-4.2.6-linux-x64.tar.gz
         # Descomprimir el archivo tar.gz. Esto creará una carpeta llamada 'apictl'
-        tar -xzf apictl-4.3.3-linux-x64.tar.gz
+        tar -xzf apictl-4.2.6-linux-x64.tar.gz
         # Instalar el archivo ejecutable 'apictl' (que está dentro de la carpeta 'apictl')
         # en /usr/local/bin y darle permisos de ejecución.
+        # --- ESTA LÍNEA TAMBIÉN SE CORRIGIÓ EN LA RESPUESTA ANTERIOR ---
         sudo install -m 755 apictl/apictl /usr/local/bin/apictl
 
     - name: Añadir Entorno WSO2
