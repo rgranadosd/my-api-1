@@ -1,29 +1,38 @@
 name: Desplegar OpenAPI en WSO2
 
+# ────────────────────────────────
+# 1. DISPARADOR
+# ────────────────────────────────
 on:
   push:
     branches: [ main ]
+    # solo si cambian archivos dentro de la carpeta apis/
     paths:
       - 'apis/**'
 
+# ────────────────────────────────
+# 2. JOB PRINCIPAL
+# ────────────────────────────────
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Clonar Repositorio
+    # 2.1 Clona el repo
+    - name: Checkout
       uses: actions/checkout@v3
 
-    - name: Instalar apictl (amd64 v4.3.3)
+    # 2.2 Instala apictl 4.3.3 (amd64)
+    - name: Instalar apictl 4.3.3
       run: |
-        DOWNLOAD_FILE="apictl-4.3.3-linux-amd64.tar.gz"
-        APIC_FOLDER="apictl"
-        curl -L -f -o "$DOWNLOAD_FILE" \
-          https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$DOWNLOAD_FILE"
-        tar -xzf "$DOWNLOAD_FILE"
-        sudo install -m 755 "$APIC_FOLDER"/apictl /usr/local/bin/apictl
+        DOWNLOAD="apictl-4.3.3-linux-amd64.tar.gz"
+        curl -Lf -o "$DOWNLOAD" \
+          https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$DOWNLOAD"
+        tar -xzf "$DOWNLOAD"
+        sudo install -m 755 apictl/apictl /usr/local/bin/apictl
         apictl version
 
+    # 2.3 Añade el entorno apuntando al túnel ngrok
     - name: Añadir entorno WSO2 (ngrok)
       env:
         APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
@@ -35,25 +44,32 @@ jobs:
           --insecure
         echo "Entorno dev-env apuntando a $APIM_ENDPOINT"
 
+    # 2.4 Login con usuario/contraseña guardados en Secrets
     - name: Iniciar sesión en WSO2 APIM
       env:
-        APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
-        APIM_USER:           ${{ secrets.APIM_USER }}
-        APIM_PASS:           ${{ secrets.APIM_PASS }}
+        APIM_USER: ${{ secrets.APIM_USER }}
+        APIM_PASS: ${{ secrets.APIM_PASS }}
       run: |
-        apictl login dev-env \
-          -u "$APIM_USER" -p "$APIM_PASS" -k
-        echo "Sesión iniciada contra $APIM_ENDPOINT"
+        apictl login dev-env -u "$APIM_USER" -p "$APIM_PASS" -k
+        echo "Sesión iniciada correctamente"
 
-    - name: Desplegar todas las definiciones OpenAPI
-      env:
-        APIM_ENDPOINT: ${{ secrets.APIM_ENDPOINT }}
+    # 2.5 Importa TODAS las definiciones OpenAPI encontradas
+    - name: Desplegar definiciones OpenAPI
       run: |
-        echo "Buscando definiciones OpenAPI para desplegar..."
-        for dir in apis/*/*; do
-          if [ -d "$dir" ] && [ -f "$dir/api.yaml" ]; then
-            echo "Importando API desde $dir ..."
-            apictl import-api -f "$dir" -e dev-env --update --insecure
-          fi
+        echo "Buscando archivos api.yaml..."
+        shopt -s globstar nullglob   # habilita ** y evita error si no hay archivos
+        for oas in apis/**/api.yaml; do
+          echo "Importando $oas"
+          apictl import api \
+            -f "$oas" \
+            -e dev-env \
+            --update \
+            --insecure \
+            --verbose
         done
-        echo "Despliegue completado."
+        echo "Despliegue completado"
+
+    # 2.6 ( Opcional ) Lista las APIs para verificar
+    - name: Listar APIs desplegadas
+      run: apictl list apis -e dev-env -k
+      # quita este paso si no lo necesitas
