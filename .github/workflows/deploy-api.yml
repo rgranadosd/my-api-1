@@ -1,18 +1,18 @@
-name: Desplegar OpenAPI en WSO2
+name: Importar APIs (working‑copy)
+
 on:
   push:
     branches: [ main ]
     paths: [ 'apis/**' ]
 
 jobs:
-  deploy:
+  create:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Código fuente
     - uses: actions/checkout@v3
 
-    # 2) Instalar apictl 4.3.3
+    # Instalar apictl (mantengo tu versión 4.3.3)
     - name: Instalar apictl
       run: |
         FILE="apictl-4.3.3-linux-amd64.tar.gz"
@@ -22,44 +22,35 @@ jobs:
         sudo install -m 755 apictl/apictl /usr/local/bin/apictl
         apictl version
 
-    # 3) Registrar entorno que apunta al túnel ngrok
-    - name: Añadir entorno WSO2 (ngrok)
+    # Añadir entorno vía túnel + login
+    - name: Login APIM
       env:
         APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
         APIM_TOKEN_ENDPOINT: ${{ secrets.APIM_TOKEN_ENDPOINT }}
+        APIM_USER:           ${{ secrets.APIM_USER }}
+        APIM_PASS:           ${{ secrets.APIM_PASS }}
       run: |
         apictl add env dev-env \
           --apim  "$APIM_ENDPOINT" \
           --token "$APIM_TOKEN_ENDPOINT" \
           --insecure
-
-    # 4) Login
-    - name: Iniciar sesión en WSO2 APIM
-      env:
-        APIM_USER: ${{ secrets.APIM_USER }}
-        APIM_PASS: ${{ secrets.APIM_PASS }}
-      run: |
         apictl login dev-env -u "$APIM_USER" -p "$APIM_PASS" -k
 
-    # 5) Por cada api.yaml → init (+OAS) → import
-    - name: Desplegar definiciones OpenAPI
+    # Importar OAS → estado CREATED y SIN despliegue
+    - name: Importar working copy (CREATED)
       run: |
-        echo "Buscando archivos api.yaml..."
         shopt -s globstar nullglob
         for oas in apis/**/api.yaml; do
-          # nombre de proyecto = carpeta que contiene api.yaml (p.e. v1 → my-api-1_v1)
           base_dir=$(dirname "$oas")
           api_name=$(basename "$(dirname "$base_dir")")
           api_version=$(basename "$base_dir")
           proj="/tmp/${api_name}_${api_version}"
-          echo "Inicializando proyecto $proj a partir de $oas"
           rm -rf "$proj"
-          apictl init "$proj" --oas "$oas" --initial-state=PUBLISHED
-          echo "Importando proyecto en WSO2..."
-          apictl import api -f "$proj" -e dev-env --update --insecure --verbose
-        done
-        echo "Despliegue completado"
 
-    # 6) (Opcional) Listar las APIs
-    - name: Listar APIs desplegadas
-      run: apictl list apis -e dev-env -k
+          # --initial-state=CREATED   ==> ciclo de vida queda en CREATED
+          apictl init "$proj" --oas "$oas" --initial-state=CREATED
+
+          # --skip-deployments        ==> NO crea ni despliega revisión
+          apictl import api -f "$proj" -e dev-env \
+            --update --skip-deployments -k
+        done
