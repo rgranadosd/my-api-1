@@ -1,28 +1,21 @@
 name: Desplegar OpenAPI en WSO2
 
-# ────────────────────────────────
-# 1. DISPARADOR
-# ────────────────────────────────
 on:
   push:
     branches: [ main ]
-    # solo si cambian archivos dentro de la carpeta apis/
     paths:
       - 'apis/**'
 
-# ────────────────────────────────
-# 2. JOB PRINCIPAL
-# ────────────────────────────────
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    # 2.1 Clona el repo
+    # 1. Código
     - name: Checkout
       uses: actions/checkout@v3
 
-    # 2.2 Instala apictl 4.3.3 (amd64)
+    # 2. apictl
     - name: Instalar apictl 4.3.3
       run: |
         DOWNLOAD="apictl-4.3.3-linux-amd64.tar.gz"
@@ -32,7 +25,7 @@ jobs:
         sudo install -m 755 apictl/apictl /usr/local/bin/apictl
         apictl version
 
-    # 2.3 Añade el entorno apuntando al túnel ngrok
+    # 3. Entorno ngrok
     - name: Añadir entorno WSO2 (ngrok)
       env:
         APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
@@ -42,26 +35,24 @@ jobs:
           --apim  "$APIM_ENDPOINT" \
           --token "$APIM_TOKEN_ENDPOINT" \
           --insecure
-        echo "Entorno dev-env apuntando a $APIM_ENDPOINT"
 
-    # 2.4 Login con usuario/contraseña guardados en Secrets
+    # 4. Login
     - name: Iniciar sesión en WSO2 APIM
       env:
         APIM_USER: ${{ secrets.APIM_USER }}
         APIM_PASS: ${{ secrets.APIM_PASS }}
       run: |
         apictl login dev-env -u "$APIM_USER" -p "$APIM_PASS" -k
-        echo "Sesión iniciada correctamente"
 
-    # 2.5 Importa TODAS las definiciones OpenAPI encontradas
+    # 5. Despliegue: usar --oas
     - name: Desplegar definiciones OpenAPI
       run: |
         echo "Buscando archivos api.yaml..."
-        shopt -s globstar nullglob   # habilita ** y evita error si no hay archivos
+        shopt -s globstar nullglob
         for oas in apis/**/api.yaml; do
           echo "Importando $oas"
           apictl import api \
-            -f "$oas" \
+            --oas "$oas" \
             -e dev-env \
             --update \
             --insecure \
@@ -69,7 +60,6 @@ jobs:
         done
         echo "Despliegue completado"
 
-    # 2.6 ( Opcional ) Lista las APIs para verificar
+    # 6. (Opcional) Listar APIs
     - name: Listar APIs desplegadas
       run: apictl list apis -e dev-env -k
-      # quita este paso si no lo necesitas
