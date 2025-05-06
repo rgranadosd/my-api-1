@@ -1,31 +1,28 @@
 name: Desplegar OpenAPI en WSO2
-
 on:
   push:
     branches: [ main ]
-    paths:
-      - 'apis/**'
+    paths: [ 'apis/**' ]
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Código
-    - name: Checkout
-      uses: actions/checkout@v3
+    # 1) Código fuente
+    - uses: actions/checkout@v3
 
-    # 2. apictl
-    - name: Instalar apictl 4.3.3
+    # 2) Instalar apictl 4.3.3
+    - name: Instalar apictl
       run: |
-        DOWNLOAD="apictl-4.3.3-linux-amd64.tar.gz"
-        curl -Lf -o "$DOWNLOAD" \
-          https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$DOWNLOAD"
-        tar -xzf "$DOWNLOAD"
+        FILE="apictl-4.3.3-linux-amd64.tar.gz"
+        curl -Lf -o "$FILE" \
+          https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$FILE"
+        tar -xzf "$FILE"
         sudo install -m 755 apictl/apictl /usr/local/bin/apictl
         apictl version
 
-    # 3. Entorno ngrok
+    # 3) Registrar entorno que apunta al túnel ngrok
     - name: Añadir entorno WSO2 (ngrok)
       env:
         APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
@@ -36,7 +33,7 @@ jobs:
           --token "$APIM_TOKEN_ENDPOINT" \
           --insecure
 
-    # 4. Login
+    # 4) Login
     - name: Iniciar sesión en WSO2 APIM
       env:
         APIM_USER: ${{ secrets.APIM_USER }}
@@ -44,22 +41,25 @@ jobs:
       run: |
         apictl login dev-env -u "$APIM_USER" -p "$APIM_PASS" -k
 
-    # 5. Despliegue: usar --oas
+    # 5) Por cada api.yaml → init (+OAS) → import
     - name: Desplegar definiciones OpenAPI
       run: |
         echo "Buscando archivos api.yaml..."
         shopt -s globstar nullglob
         for oas in apis/**/api.yaml; do
-          echo "Importando $oas"
-          apictl import api \
-            --oas "$oas" \
-            -e dev-env \
-            --update \
-            --insecure \
-            --verbose
+          # nombre de proyecto = carpeta que contiene api.yaml (p.e. v1 → my-api-1_v1)
+          base_dir=$(dirname "$oas")
+          api_name=$(basename "$(dirname "$base_dir")")
+          api_version=$(basename "$base_dir")
+          proj="/tmp/${api_name}_${api_version}"
+          echo "Inicializando proyecto $proj a partir de $oas"
+          rm -rf "$proj"
+          apictl init "$proj" --oas "$oas" --initial-state=PUBLISHED
+          echo "Importando proyecto en WSO2..."
+          apictl import api -f "$proj" -e dev-env --update --insecure --verbose
         done
         echo "Despliegue completado"
 
-    # 6. (Opcional) Listar APIs
+    # 6) (Opcional) Listar las APIs
     - name: Listar APIs desplegadas
       run: apictl list apis -e dev-env -k
