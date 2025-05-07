@@ -1,30 +1,56 @@
-# Contenido de tu archivo scoring.yml (o como se llame)
-name: Scoring Workflow
+name: Importar APIs (working‑copy)
 
 on:
-  workflow_dispatch: # Permite que este workflow sea disparado manualmente o por API
-    inputs: # Opcional: si quieres pasar datos al workflow de scoring
-      triggering_workflow_ref:
-        description: 'Referencia (rama/tag) del workflow que lo disparó'
-        required: false
-      # Puedes añadir más inputs aquí
+  push:
+    branches: [ main ]
+    paths: [ 'apis/**' ]
 
 jobs:
-  execute_scoring:
+  create:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout código
-        uses: actions/checkout@v3
-        with:
-          ref: ${{ github.event.inputs.triggering_workflow_ref || github.ref }} # Usa el ref pasado o el del propio workflow
+    - uses: actions/checkout@v3
 
-      - name: Mostrar información del trigger (opcional)
-        run: |
-          echo "Workflow de Scoring disparado."
-          echo "Referencia: ${{ github.event.inputs.triggering_workflow_ref || github.ref }}"
-          # Accede a otros inputs con: ${{ github.event.inputs.nombre_del_input }}
+    # Instalar apictl (mantengo tu versión 4.3.3)
+    - name: Instalar apictl
+      run: |
+        FILE="apictl-4.3.3-linux-amd64.tar.gz"
+        curl -Lf -o "$FILE" \
+          https://github.com/wso2/product-apim-tooling/releases/download/v4.3.3/"$FILE"
+        tar -xzf "$FILE"
+        sudo install -m 755 apictl/apictl /usr/local/bin/apictl
+        apictl version
 
-      - name: Ejecutar lógica de scoring
-        run: |
-          echo "Ejecutando el proceso de scoring..."
-          # Aquí irían tus comandos de scoring
+    # Añadir entorno vía túnel + login
+    - name: Login APIM
+      env:
+        APIM_ENDPOINT:       ${{ secrets.APIM_ENDPOINT }}
+        APIM_TOKEN_ENDPOINT: ${{ secrets.APIM_TOKEN_ENDPOINT }}
+        APIM_USER:           ${{ secrets.APIM_USER }}
+        APIM_PASS:           ${{ secrets.APIM_PASS }}
+      run: |
+        apictl add env dev-env \
+          --apim  "$APIM_ENDPOINT" \
+          --token "$APIM_TOKEN_ENDPOINT" \
+          --insecure
+        apictl login dev-env -u "$APIM_USER" -p "$APIM_PASS" -k
+
+    # Importar OAS → estado CREATED y SIN despliegue
+    - name: Importar working copy (CREATED)
+      run: |
+        shopt -s globstar nullglob
+        for oas in apis/**/api.yaml; do
+          base_dir=$(dirname "$oas")
+          api_name=$(basename "$(dirname "$base_dir")")
+          api_version=$(basename "$base_dir")
+          proj="/tmp/${api_name}_${api_version}"
+          rm -rf "$proj"
+
+          # --initial-state=CREATED   ==> ciclo de vida queda en CREATED
+          apictl init "$proj" --oas "$oas" --initial-state=CREATED
+
+          # --skip-deployments        ==> NO crea ni despliega revisión
+          apictl import api -f "$proj" -e dev-env \
+            --update --skip-deployments -k
+        done
