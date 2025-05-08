@@ -2,7 +2,7 @@ name: API Scoring
 
 on:
   workflow_run:
-    workflows: ["Importar APIs"]
+    workflows: ["Importar APIs (working‑copy)"]
     types:
       - completed
 
