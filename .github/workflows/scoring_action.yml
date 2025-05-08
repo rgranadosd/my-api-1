@@ -1,0 +1,19 @@
+name: API Scoring
+
+on:
+  workflow_run:
+    workflows: ["Importar APIs (working‑copy)"]
+    types:
+      - completed
+
+jobs:
+  run-scoring:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Ejecutar análisis de calidad
+        run: |
+          echo "Aquí iría tu lógica de scoring..."
