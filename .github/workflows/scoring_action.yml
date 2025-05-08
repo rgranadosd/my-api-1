@@ -34,7 +34,6 @@ jobs:
       run: |
         docker-compose up --build -d
         echo "⏳ Waiting for /health 200..."
-        # Bucle de espera mejorado con curl -v para ver más detalles si falla
         for i in {1..30}; do
           if curl -sf http://localhost:8088/health >/dev/null; then
             echo "✅ Ready"
@@ -43,8 +42,8 @@ jobs:
           sleep 5
           if [ $i -eq 30 ]; then
             echo "::error::Timeout - Container not healthy"
-            docker-compose logs # Mostrar logs si falla el health check
-            curl -v http://localhost:8088/health # Mostrar detalles del curl si falla
+            docker-compose logs
+            curl -v http://localhost:8088/health
             exit 1
           fi
         done
@@ -54,22 +53,19 @@ jobs:
       id: specs
       run: |
         mapfile -t SPEC_FILES < <(git ls-files 'apis/**/api.yaml')
-        # Verificar si se encontraron archivos antes de continuar
         if [ ${#SPEC_FILES[@]} -eq 0 ]; then
           echo "::error::No se encontró ningún archivo api.yaml."
           exit 1
         fi
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
-        echo "::notice::Archivos api.yaml encontrados: ${SPEC_FILES[*]}" # Log para ver qué archivos se encontraron
+        echo "::notice::Archivos api.yaml encontrados: ${SPEC_FILES[*]}"
 
     # 6) Calcular scoring y generar Job Summary coloreado
     - name: Run scoring & build summary
       run: |
-        # Leer las especificaciones encontradas en el paso anterior
         mapfile -t SPECS <<<"${{ steps.specs.outputs.specs }}"
-        mkdir -p scores # Asegurarse de que el directorio 'scores' existe
+        mkdir -p scores
 
-        # Cabecera del resumen que se mostrará en el Job Summary
         {
           echo "## Resultados de calidad de las APIs"
           echo
@@ -77,25 +73,19 @@ jobs:
           echo "|-----|--------|------|"
         } >> "$GITHUB_STEP_SUMMARY"
 
-        # Función auxiliar de shell para colorear celdas según la nota
         color () {
           [[ "$1" =~ ^([A]|B($|\+)) ]] \
             && printf "<span style='color:#22863a;font-weight:bold;'>%s</span>" "$1" \
             || printf "<span style='color:#d91e18;font-weight:bold;'>%s</span>" "$1"
         }
 
-        # Iterar sobre cada archivo de especificación api.yaml encontrado
         for spec in "${SPECS[@]}"; do
-          # Extraer el nombre de la API y la versión del path del archivo
           api=$(basename "$(dirname "$(dirname "$spec")")")
           ver=$(basename "$(dirname "$spec")")
-          out="scores/${api}_${ver}.json" # Definir el nombre del archivo de salida del scoring
+          out="scores/${api}_${ver}.json"
 
-          echo "⏩ Scoring $spec → $out" # Imprimir progreso
+          echo "⏩ Scoring $spec → $out"
 
-          # Ejecutar la llamada al motor de scoring usando curl
-          # Añadido -v para ver detalles del request/response en el log si hay problemas
-          # Añadido || true para que el script no falle si curl falla, permitiendo inspeccionar el archivo de salida si se creó parcialmente
           curl --fail -s -v \
             -X POST \
             -F "file=@${spec};type=text/yaml" \
@@ -105,7 +95,7 @@ jobs:
 
           # --- DEBUG: Mostrar el contenido del archivo JSON generado ---
           echo "--- DEBUG: Contenido de $out ---"
-          if [ -s "$out" ]; then # Verificar si el archivo no está vacío
+          if [ -s "$out" ]; then
              cat "$out"
           else
              echo "El archivo $out está vacío o no se creó."
@@ -113,53 +103,57 @@ jobs:
           echo "-----------------------------------"
 
           # ─── Procesar y añadir la Fila Overall al resumen ───
-          # Usar jq para extraer la nota general
-          overall=$(jq -r '.overallGrade // .grade // "?"' "$out")
-          echo "--- DEBUG: Overall grade for ${spec}: ${overall} ---" # DEBUG
-          # Añadir la fila Overall a la tabla del resumen
+          # *** CORRECCIÓN: Usar .overallRating en lugar de .overallGrade/.grade ***
+          overall=$(jq -r '.overallRating // "?"' "$out")
+          echo "--- DEBUG: Overall grade for ${spec}: ${overall} ---"
           echo "| ${api} ${ver} | **Overall** | $(color "$overall") |" >> "$GITHUB_STEP_SUMMARY"
 
-          # ─── Recorrer .modules (array u objeto) y añadirlos al resumen ───
-          # Usar jq para extraer los módulos y sus notas.
-          # Comando jq corregido.
-          # --- DEBUG: Mostrar la salida de jq antes del while ---
-          echo "--- DEBUG: Salida de jq para módulos desde $out ---"
+          # ─── Recorrer módulos específicos (Design, Security, Documentation) y añadirlos al resumen ───
+          # *** CORRECCIÓN: Adaptar jq para extraer ratings específicos del nivel superior ***
+          echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
           JQ_MODULE_OUTPUT=$(jq -r '
-            def pairs_from_array:
-              map({
-                name: (.name // .module // .id),
-                grade: (.grade // .score // .value // .rating // "?")
-              }) | map("\(.name)\t\(.grade)");
-            def pairs_from_object:
-              to_entries | map({
-                key: .key,
-                value: (.value // "?")
-              }) | map("\(.key)\t\(.value)") ; # Espacio eliminado aquí
-            (.modules // {}) as $m
-            |  if ($m|type) == "array"  then $m | pairs_from_array[]
-               elif ($m|type) == "object" then $m | pairs_from_object[]
-               else empty end
+            # Creamos un objeto con los nombres de "módulos" y sus ratings correspondientes
+            {
+              "Design": .designRating,
+              "Security": .securityRating,
+              "Documentation": .documentationRating
+            }
+            # Convertimos el objeto a un array de pares [clave, valor]
+            | to_entries
+            # Mapeamos cada par a una cadena "clave\tvalor"
+            | map("\(.key)\t\(.value // "?")") # Usamos // "?" por si algún rating falta
+            # Imprimimos cada cadena como una línea separada
+            | .[]
           ' "$out")
           echo "$JQ_MODULE_OUTPUT"
           echo "---------------------------------------------"
 
           # Procesar la salida de jq y añadir filas por módulo al resumen
           echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod grade; do
-              # Por cada par "módulo nota", añadir una fila
-              echo "| ${api} ${ver} | ${mod} | $(color "$grade") |" >> "$GITHUB_STEP_SUMMARY"
-              echo "--- DEBUG: Added module row for ${mod} with grade ${grade} ---" # DEBUG
+              # Solo añadir la fila si hemos podido extraer tanto el módulo como la nota
+              if [ -n "$mod" ] && [ -n "$grade" ]; then
+                echo "| ${api} ${ver} | ${mod} | $(color "$grade") |" >> "$GITHUB_STEP_SUMMARY"
+                echo "--- DEBUG: Added module row for ${mod} with grade ${grade} ---"
+              else
+                echo "--- DEBUG: Skipping empty or incomplete module row (mod: '${mod}', grade: '${grade}') ---"
+              fi
           done
         done
+
+        # --- DEBUG: Mostrar el contenido final del Job Summary ---
+        echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
+        cat "$GITHUB_STEP_SUMMARY"
+        echo "-------------------------------------------------"
 
     # 7) Subir todos los JSON generados como un artefacto del workflow
     - name: Upload scores
       uses: actions/upload-artifact@v4
       with:
-        name: api-scores # Nombre del artefacto
-        path: scores/ # Directorio a comprimir y subir
+        name: api-scores
+        path: scores/
 
-    # 8) Apagar y limpiar el contenedor de Docker (Este paso siempre se ejecuta, incluso si fallan los anteriores)
+    # 8) Apagar y limpiar el contenedor de Docker (Este paso siempre se ejecuta)
     - name: Tear-down
-      if: always() # Garantiza que este paso se ejecute
-      working-directory: scoring_engine # Ejecutar desde el directorio del motor de scoring
-      run: docker-compose down # Comando para detener y eliminar los contenedores y redes definidos en docker-compose.yml
+      if: always()
+      working-directory: scoring_engine
+      run: docker-compose down
