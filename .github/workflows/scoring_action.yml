@@ -58,42 +58,35 @@ jobs:
           exit 1
         fi
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
-        echo "::notice::Archivos api.yaml encontrados: ${SPEC_FILES[*]}" # Log para ver qué archivos se encontraron
+        echo "::notice::Archivos api.yaml encontrados: ${SPEC_FILES[*]}"
 
-    # 6) Calcular scoring y generar Job Summary (con depuración y color simplificado)
-    - name: Run scoring & build summary (Debugging)
+    # 6) Calcular scoring y generar Job Summary
+    - name: Run scoring & build summary
       run: |
-        echo "--- DEBUG: Inicio del paso 6 ---"
         mapfile -t SPECS <<<"${{ steps.specs.outputs.specs }}"
-        echo "--- DEBUG: SPECS leídas: ${SPECS[*]} ---"
         mkdir -p scores
-        echo "--- DEBUG: Directorio 'scores' creado ---"
-
 
         # Cabecera del resumen con la nueva columna 'Score'
-        echo "--- DEBUG: Escribiendo encabezado del summary ---"
         {
           echo "## Resultados de calidad de las APIs"
           echo
           echo "| API | Módulo | Nota | Score |" # Nueva columna Score
           echo "|-----|--------|------|-------|"
         } >> "$GITHUB_STEP_SUMMARY"
-        echo "--- DEBUG: Encabezado escrito ---"
 
-        # --- TEMPORAL: Función auxiliar que NO añade color HTML, solo devuelve el texto ---
-        # Si esta versión funciona, el problema está en el HTML de la función 'color'.
+        # Función auxiliar de shell para colorear celdas según la nota
+        # RESTAURADA: Versión original con color verde para A, A+, B y rojo para el resto
         color () {
-          echo -n "$1" # Usar echo -n para evitar nueva línea no deseada en la tabla
+          [[ "$1" =~ ^([A]|B($|\+)) ]] \
+            && printf "<span style='color:#22863a;font-weight:bold;'>%s</span>" "$1" \
+            || printf "<span style='color:#d91e18;font-weight:bold;'>%s</span>" "$1"
         }
-        # --------------------------------------------------------
+        # --------------------------------------------------------------------------
 
-        echo "--- DEBUG: Iniciando bucle sobre SPEC_FILES ---"
         for spec in "${SPECS[@]}"; do
-          echo "--- DEBUG: Procesando spec: $spec ---"
           api=$(basename "$(dirname "$(dirname "$spec")")")
           ver=$(basename "$(dirname "$spec")")
           out="scores/${api}_${ver}.json"
-          echo "--- DEBUG: API: ${api}, Versión: ${ver}, Archivo de salida: ${out} ---"
 
           echo "⏩ Scoring $spec → $out"
 
@@ -103,64 +96,49 @@ jobs:
             -F "apiProtocol=REST" \
             http://localhost:8088/apifirst/v1/apis/score-file \
             -o "$out" || { echo "::warning::Curl failed for ${spec}. Check logs for details."; cat "$out" 2>/dev/null; true; }
-          echo "--- DEBUG: curl ejecutado. Estado del archivo ${out}: $([ -s "$out" ] && echo 'no vacío' || echo 'vacío') ---"
-
 
           # --- DEBUG: Mostrar el contenido del archivo JSON ---
           echo "--- DEBUG: Contenido de $out ---"
-          if [ -s "$out" ]; then cat "$out"; else echo "El archivo $out está vacío o no se creó." >&2; fi # Escribir error a stderr
+          if [ -s "$out" ]; then cat "$out"; else echo "El archivo $out está vacío o no se creó." >&2; fi
           echo "-----------------------------------"
 
 
           # ─── Procesar y añadir la Fila Overall al resumen ───
-          echo "--- DEBUG: Procesando fila Overall ---"
           read -r overall_rating overall_score <<< $(jq -r '[.overallRating // "?", (.overallScore | tostring) // "-"] | @tsv' "$out")
           echo "--- DEBUG: Overall rating extraído: '${overall_rating}', Overall score extraído: '${overall_score}' ---"
 
           echo "| ${api} ${ver} | **Overall** | $(color "$overall_rating") | ${overall_score:- -} |" >> "$GITHUB_STEP_SUMMARY"
-          echo "--- DEBUG: Fila Overall añadida al summary ---"
 
 
           # ─── Recorrer módulos específicos (Design, Security, Documentation) y añadirlos al resumen ───
-          echo "--- DEBUG: Procesando módulos específicos ---"
           JQ_MODULE_OUTPUT=$(jq -r '
-            # Creamos un array con objetos para cada "módulo", incluyendo nombre, rating y score
             [
               {"name": "Design", "rating": .designRating, "score": .designScore},
               {"name": "Security", "rating": .securityRating, "score": .securityScore},
               {"name": "Documentation", "rating": .documentationRating, "score": .documentationScore}
             ]
-            # Convertimos cada objeto a una cadena "NombreMódulo\tRating\tScore"
-            | map("\(.name)\t\(.rating // "?")\t\((.score | tostring) // "-")") # Convertir score a string
-            # Imprimimos cada cadena como una línea separada
+            | map("\(.name)\t\(.rating // "?")\t\((.score | tostring) // "-")")
             | .[]
           ' "$out")
-          echo "--- DEBUG: Salida de jq para módulos (antes del while): ---"
+
+          # --- DEBUG: Mostrar la salida de jq para módulos ---
+          echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
           echo "$JQ_MODULE_OUTPUT"
           echo "---------------------------------------------"
 
 
           # Procesar la salida de jq (NombreMódulo\tRating\tScore) y añadir filas al resumen
-          echo "--- DEBUG: Entrando al bucle while para módulos ---"
           echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod rating score; do
-              echo "--- DEBUG: Dentro del bucle while. Mod: '${mod}', Rating: '${rating}', Score: '${score:- -}' ---"
               if [ -n "$mod" ] && [ -n "$rating" ]; then
                 echo "| ${api} ${ver} | ${mod} | $(color "$rating") | ${score:- -} |" >> "$GITHUB_STEP_SUMMARY"
-                echo "--- DEBUG: Fila de módulo añadida al summary ---"
-              else
-                echo "--- DEBUG: Saltando fila de módulo incompleta ---"
               fi
           done
-          echo "--- DEBUG: Saliendo del bucle while para módulos ---"
-        done # Fin del bucle for sobre SPECS
-        echo "--- DEBUG: Fin del bucle for sobre SPECS ---"
-
+        done
 
         # --- DEBUG: Mostrar el contenido final del Job Summary ---
         echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
         cat "$GITHUB_STEP_SUMMARY"
         echo "-------------------------------------------------"
-        echo "--- DEBUG: Fin del paso 6 ---"
 
 
     # 7) Subir todos los JSON generados como un artefacto del workflow
