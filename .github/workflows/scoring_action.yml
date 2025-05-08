@@ -17,3 +17,15 @@ jobs:
       - name: Clone scoring engine
         run: |
           git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
+
+      - name: Start scoring engine (Docker Compose)
+        working-directory: scoring_engine
+        run: |
+          docker-compose up --build -d
+          echo "⏳ Esperando a que el servicio responda en http://localhost:8088 ..."
+          for i in {1..30}; do
+            if curl -s http://localhost:8088/ | grep -qiE "api|swagger|health"; then
+              echo "Scoring engine listo"; break
+            fi
+            sleep 5
+          done
