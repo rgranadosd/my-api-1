@@ -2,7 +2,7 @@ name: API Scoring
 
 on:
   workflow_run:
-    workflows: ["Importar"]
+    workflows: ["Importar"]           # ← debe coincidir EXACTAMENTE con el name: del flujo padre
     types: [completed]
 
 jobs:
@@ -11,14 +11,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1. Checkout
-    - uses: actions/checkout@v3
+    # 1) Código fuente
+    - name: Checkout repo
+      uses: actions/checkout@v3
 
-    # 2. Clonar engine
+    # 2) Clonar el motor de scoring
     - name: Clone scoring engine
       run: git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
 
-    # 3. Wrapper docker-compose (runners con Compose v2)
+    # 3) Wrapper para docker-compose (runners con Compose v2)
     - name: Habilitar docker-compose
       run: |
         if ! command -v docker-compose &>/dev/null; then
@@ -27,7 +28,7 @@ jobs:
           sudo chmod +x /usr/local/bin/docker-compose
         fi
 
-    # 4. Arrancar contenedor  ─ espera solo a que /health devuelva 200
+    # 4) Arrancar el contenedor y esperar a que /health devuelva 200
     - name: Start scoring engine
       working-directory: scoring_engine
       run: |
@@ -40,7 +41,7 @@ jobs:
           [ $i -eq 30 ] && { echo "::error::Timeout"; docker-compose logs; exit 1; }
         done
 
-    # 5. Localizar todas las specs apis/**/api.yaml
+    # 5) Localizar todas las especificaciones apis/**/api.yaml
     - name: Localizar especificaciones
       id: specs
       run: |
@@ -48,33 +49,38 @@ jobs:
         [ ${#SPEC_FILES[@]} -eq 0 ] && { echo "::error::Sin api.yaml"; exit 1; }
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-    # 6. Enviar cada spec al endpoint con apiProtocol=REST
+    # 6) Enviar cada api.yaml al motor y guardar la respuesta
     - name: Calcular scoring
       run: |
-        IFS=$'\n' read -d '' -r -a SPECS <<<"${{ steps.specs.outputs.specs }}"
+        mapfile -t SPECS <<<"${{ steps.specs.outputs.specs }}"
         mkdir -p scores
         echo "### Resultados" >> "$GITHUB_STEP_SUMMARY"
+
         for spec in "${SPECS[@]}"; do
           api=$(basename "$(dirname "$(dirname "$spec")")")
           ver=$(basename "$(dirname "$spec")")
           out="scores/${api}_${ver}.json"
+
+          echo "⏩ Scoring $spec → $out"
           curl --fail -s \
             -X POST \
             -F "file=@${spec};type=text/yaml" \
             -F "apiProtocol=REST" \
             http://localhost:8088/apifirst/v1/apis/score-file \
             -o "$out"
+
           grade=$(jq -r '.overallGrade // .grade // "?"' "$out")
           echo "• **${api} ${ver}** → ${grade}" >> "$GITHUB_STEP_SUMMARY"
         done
 
-    # 7. Artefacto con todos los JSON
-    - uses: actions/upload-artifact@v4
+    # 7) Subir todos los JSON como artefacto
+    - name: Upload scores
+      uses: actions/upload-artifact@v4
       with:
         name: api-scores
         path: scores/
 
-    # 8. Limpieza
+    # 8) Apagar y limpiar el contenedor, pase lo que pase
     - name: Tear-down
       if: always()
       working-directory: scoring_engine
