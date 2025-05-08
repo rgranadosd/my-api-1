@@ -2,7 +2,7 @@ name: API Scoring
 
 on:
   workflow_run:
-    workflows: ["Importar"]           # ← debe coincidir EXACTAMENTE con el name: del flujo padre
+    workflows: ["Importar"]          # ← Debe coincidir con el name: de tu flujo padre
     types: [completed]
 
 jobs:
@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Código fuente
+    # 1) Checkout del repositorio
     - name: Checkout repo
       uses: actions/checkout@v3
 
@@ -19,16 +19,16 @@ jobs:
     - name: Clone scoring engine
       run: git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
 
-    # 3) Wrapper para docker-compose (runners con Compose v2)
+    # 3) Crear alias docker-compose si el runner sólo trae Compose v2
     - name: Habilitar docker-compose
       run: |
         if ! command -v docker-compose &>/dev/null; then
-          printf '#!/usr/bin/env bash\nexec docker compose "$@"\n' | \
-            sudo tee /usr/local/bin/docker-compose >/dev/null
+          printf '#!/usr/bin/env bash\nexec docker compose "$@"\n' \
+            | sudo tee /usr/local/bin/docker-compose >/dev/null
           sudo chmod +x /usr/local/bin/docker-compose
         fi
 
-    # 4) Arrancar el contenedor y esperar a que /health devuelva 200
+    # 4) Arrancar contenedor y esperar a que /health devuelva 200 OK
     - name: Start scoring engine
       working-directory: scoring_engine
       run: |
@@ -38,7 +38,7 @@ jobs:
           if curl -sf http://localhost:8088/health >/dev/null; then
             echo "✅ Scoring engine listo"; break; fi
           sleep 5
-          [ $i -eq 30 ] && { echo "::error::Timeout"; docker-compose logs; exit 1; }
+          [[ $i -eq 30 ]] && { echo "::error::Timeout"; docker-compose logs; exit 1; }
         done
 
     # 5) Localizar todas las especificaciones apis/**/api.yaml
@@ -49,12 +49,19 @@ jobs:
         [ ${#SPEC_FILES[@]} -eq 0 ] && { echo "::error::Sin api.yaml"; exit 1; }
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-    # 6) Enviar cada api.yaml al motor y guardar la respuesta
+    # 6) Calcular scoring y generar resumen coloreado
     - name: Calcular scoring
       run: |
         mapfile -t SPECS <<<"${{ steps.specs.outputs.specs }}"
         mkdir -p scores
-        echo "### Resultados" >> "$GITHUB_STEP_SUMMARY"
+
+        # Cabecera de la tabla en el Job Summary
+        {
+          echo "## Resultados de calidad de las APIs"
+          echo ""
+          echo "| API | Módulo | Nota |"
+          echo "|-----|--------|------|"
+        } >> "$GITHUB_STEP_SUMMARY"
 
         for spec in "${SPECS[@]}"; do
           api=$(basename "$(dirname "$(dirname "$spec")")")
@@ -69,8 +76,19 @@ jobs:
             http://localhost:8088/apifirst/v1/apis/score-file \
             -o "$out"
 
-          grade=$(jq -r '.overallGrade // .grade // "?"' "$out")
-          echo "• **${api} ${ver}** → ${grade}" >> "$GITHUB_STEP_SUMMARY"
+          # Recorremos los módulos devueltos y pintamos cada nota
+          jq -r '
+            .modules // .scoring // {}          # compat claves
+            | to_entries[]
+            | "\(.key)\t\(.value)"
+          ' "$out" | while IFS=$'\t' read -r module grade; do
+            if [[ "$grade" =~ ^([A]|B($|\+)) ]]; then         # B, B+, A…
+              cell="<span style=\"color:#22863a;font-weight:bold;\">$grade</span>"
+            else                                               # B- o menor
+              cell="<span style=\"color:#d91e18;font-weight:bold;\">$grade</span>"
+            fi
+            echo "| ${api} ${ver} | ${module} | ${cell} |" >> "$GITHUB_STEP_SUMMARY"
+          done
         done
 
     # 7) Subir todos los JSON como artefacto
@@ -80,7 +98,7 @@ jobs:
         name: api-scores
         path: scores/
 
-    # 8) Apagar y limpiar el contenedor, pase lo que pase
+    # 8) Apagar y limpiar el contenedor siempre
     - name: Tear-down
       if: always()
       working-directory: scoring_engine
