@@ -34,10 +34,19 @@ jobs:
       run: |
         docker-compose up --build -d
         echo "⏳ Waiting for /health 200..."
+        # Bucle de espera mejorado con curl -v para ver más detalles si falla
         for i in {1..30}; do
-          curl -sf http://localhost:8088/health >/dev/null && { echo "✅ Ready"; break; }
+          if curl -sf http://localhost:8088/health >/dev/null; then
+            echo "✅ Ready"
+            break
+          fi
           sleep 5
-          [[ $i -eq 30 ]] && { echo "::error::Timeout"; docker-compose logs; exit 1; }
+          if [ $i -eq 30 ]; then
+            echo "::error::Timeout - Container not healthy"
+            docker-compose logs # Mostrar logs si falla el health check
+            curl -v http://localhost:8088/health # Mostrar detalles del curl si falla
+            exit 1
+          fi
         done
 
     # 5) Localizar todas las especificaciones apis/**/api.yaml
@@ -51,6 +60,7 @@ jobs:
           exit 1
         fi
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
+        echo "::notice::Archivos api.yaml encontrados: ${SPEC_FILES[*]}" # Log para ver qué archivos se encontraron
 
     # 6) Calcular scoring y generar Job Summary coloreado
     - name: Run scoring & build summary
@@ -84,46 +94,60 @@ jobs:
           echo "⏩ Scoring $spec → $out" # Imprimir progreso
 
           # Ejecutar la llamada al motor de scoring usando curl
-          curl --fail -s \
+          # Añadido -v para ver detalles del request/response en el log si hay problemas
+          # Añadido || true para que el script no falle si curl falla, permitiendo inspeccionar el archivo de salida si se creó parcialmente
+          curl --fail -s -v \
             -X POST \
             -F "file=@${spec};type=text/yaml" \
             -F "apiProtocol=REST" \
             http://localhost:8088/apifirst/v1/apis/score-file \
-            -o "$out" # Guardar la respuesta (el JSON del scoring) en un archivo
+            -o "$out" || { echo "::warning::Curl failed for ${spec}. Check logs for details."; cat "$out" 2>/dev/null; true; }
+
+          # --- DEBUG: Mostrar el contenido del archivo JSON generado ---
+          echo "--- DEBUG: Contenido de $out ---"
+          if [ -s "$out" ]; then # Verificar si el archivo no está vacío
+             cat "$out"
+          else
+             echo "El archivo $out está vacío o no se creó."
+          fi
+          echo "-----------------------------------"
 
           # ─── Procesar y añadir la Fila Overall al resumen ───
-          # Usar jq para extraer la nota general, manejando posibles nombres de campo diferentes
+          # Usar jq para extraer la nota general
           overall=$(jq -r '.overallGrade // .grade // "?"' "$out")
-          # Añadir la fila Overall a la tabla del resumen, coloreando la nota
+          echo "--- DEBUG: Overall grade for ${spec}: ${overall} ---" # DEBUG
+          # Añadir la fila Overall a la tabla del resumen
           echo "| ${api} ${ver} | **Overall** | $(color "$overall") |" >> "$GITHUB_STEP_SUMMARY"
 
           # ─── Recorrer .modules (array u objeto) y añadirlos al resumen ───
           # Usar jq para extraer los módulos y sus notas.
-          # Este es el comando jq corregido para evitar problemas de comillado.
-          jq -r '
-            # Define una función para procesar módulos si .modules es un array
+          # Comando jq corregido.
+          # --- DEBUG: Mostrar la salida de jq antes del while ---
+          echo "--- DEBUG: Salida de jq para módulos desde $out ---"
+          JQ_MODULE_OUTPUT=$(jq -r '
             def pairs_from_array:
-              map({ # Mapea cada elemento del array a un objeto temporal
-                name: (.name // .module // .id), # Encuentra el nombre/id del módulo
-                grade: (.grade // .score // .value // .rating // "?") # Encuentra la nota/valor del módulo
-              }) | map("\(.name)\t\(.grade)"); # Formatea los objetos a "nombre\tnota"
-
-            # Define una función para procesar módulos si .modules es un objeto
+              map({
+                name: (.name // .module // .id),
+                grade: (.grade // .score // .value // .rating // "?")
+              }) | map("\(.name)\t\(.grade)");
             def pairs_from_object:
-              to_entries | map({ # Convierte el objeto en un array de [key, value]
-                key: .key, # La clave es el nombre del módulo
-                value: (.value // "?") # El valor es la nota del módulo
-              }) | map("\(.key)\t\(.value)"); # Formatea los objetos a "nombre\tnota"
-
-            # Selecciona .modules, si no existe usa un objeto vacío {}
+              to_entries | map({
+                key: .key,
+                value: (.value // "?")
+              }) | map("\(.key)\t\(.value)") ; # Espacio eliminado aquí
             (.modules // {}) as $m
-            # Verifica si $m es un array o un objeto y aplica la función correspondiente
-            |  if ($m|type) == "array"  then $m | pairs_from_array[] # Si es array, procesa como array
-               elif ($m|type) == "object" then $m | pairs_from_object[] # Si es objeto, procesa como objeto
-               else empty end # Si no es ni array ni objeto, no produce salida
-          ' "$out" | while IFS=$'\t' read -r mod grade; do
-              # Por cada par "módulo nota" encontrado por jq, añadir una fila a la tabla del resumen
+            |  if ($m|type) == "array"  then $m | pairs_from_array[]
+               elif ($m|type) == "object" then $m | pairs_from_object[]
+               else empty end
+          ' "$out")
+          echo "$JQ_MODULE_OUTPUT"
+          echo "---------------------------------------------"
+
+          # Procesar la salida de jq y añadir filas por módulo al resumen
+          echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod grade; do
+              # Por cada par "módulo nota", añadir una fila
               echo "| ${api} ${ver} | ${mod} | $(color "$grade") |" >> "$GITHUB_STEP_SUMMARY"
+              echo "--- DEBUG: Added module row for ${mod} with grade ${grade} ---" # DEBUG
           done
         done
 
