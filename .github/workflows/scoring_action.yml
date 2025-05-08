@@ -74,14 +74,20 @@ jobs:
           echo "|-----|--------|------|-------|"
         } >> "$GITHUB_STEP_SUMMARY"
 
-        # Función auxiliar de shell para colorear celdas según la nota
-        # RESTAURADA: Versión original con color verde para A, A+, B y rojo para el resto
+        # Función auxiliar de shell para añadir un símbolo Unicode según la nota
         color () {
-          [[ "$1" =~ ^([A]|B($|\+)) ]] \
-            && printf "<span style='color:#22863a;font-weight:bold;'>%s</span>" "$1" \
-            || printf "<span style='color:#d91e18;font-weight:bold;'>%s</span>" "$1"
+          local grade="$1"
+          local symbol=""
+          if [[ "$grade" =~ ^A(\+|$) ]]; then # A o A+ (Símbolo verde)
+            symbol="✅ "
+          elif [[ "$grade" == "B" ]]; then # B (Símbolo amarillo)
+            symbol="⚠️ "
+          else # Cualquier otra cosa (Símbolo rojo)
+            symbol="❌ "
+          fi
+          echo -n "${symbol}${grade}" # Devuelve el símbolo + la nota
         }
-        # --------------------------------------------------------------------------
+        # -----------------------------------------------------------------
 
         for spec in "${SPECS[@]}"; do
           api=$(basename "$(dirname "$(dirname "$spec")")")
@@ -97,16 +103,17 @@ jobs:
             http://localhost:8088/apifirst/v1/apis/score-file \
             -o "$out" || { echo "::warning::Curl failed for ${spec}. Check logs for details."; cat "$out" 2>/dev/null; true; }
 
-          # --- DEBUG: Mostrar el contenido del archivo JSON ---
-          echo "--- DEBUG: Contenido de $out ---"
-          if [ -s "$out" ]; then cat "$out"; else echo "El archivo $out está vacío o no se creó." >&2; fi
-          echo "-----------------------------------"
+          # --- DEBUG: Mostrar el contenido del archivo JSON (opcional) ---
+          # echo "--- DEBUG: Contenido de $out ---"
+          # if [ -s "$out" ]; then cat "$out"; else echo "El archivo $out está vacío o no se creó." >&2; fi
+          # echo "-----------------------------------"
 
 
           # ─── Procesar y añadir la Fila Overall al resumen ───
           read -r overall_rating overall_score <<< $(jq -r '[.overallRating // "?", (.overallScore | tostring) // "-"] | @tsv' "$out")
-          echo "--- DEBUG: Overall rating extraído: '${overall_rating}', Overall score extraído: '${overall_score}' ---"
+          # echo "--- DEBUG: Overall rating extraído: '${overall_rating}', Overall score extraído: '${overall_score}' ---" # DEBUG opcional
 
+          # Usar la función color (símbolo) para la nota Overall
           echo "| ${api} ${ver} | **Overall** | $(color "$overall_rating") | ${overall_score:- -} |" >> "$GITHUB_STEP_SUMMARY"
 
 
@@ -121,24 +128,26 @@ jobs:
             | .[]
           ' "$out")
 
-          # --- DEBUG: Mostrar la salida de jq para módulos ---
-          echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
-          echo "$JQ_MODULE_OUTPUT"
-          echo "---------------------------------------------"
+          # --- DEBUG: Mostrar la salida de jq para módulos (opcional) ---
+          # echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
+          # echo "$JQ_MODULE_OUTPUT"
+          # echo "---------------------------------------------"
 
 
           # Procesar la salida de jq (NombreMódulo\tRating\tScore) y añadir filas al resumen
           echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod rating score; do
               if [ -n "$mod" ] && [ -n "$rating" ]; then
+                # Usar la función color (símbolo) para la nota del módulo
                 echo "| ${api} ${ver} | ${mod} | $(color "$rating") | ${score:- -} |" >> "$GITHUB_STEP_SUMMARY"
+                # echo "--- DEBUG: Fila de módulo añadida al summary. Mod: ${mod}, Rating: $(color "$rating"), Score: ${score:- -} ---" # DEBUG opcional
               fi
           done
         done
 
-        # --- DEBUG: Mostrar el contenido final del Job Summary ---
-        echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
-        cat "$GITHUB_STEP_SUMMARY"
-        echo "-------------------------------------------------"
+        # --- DEBUG: Mostrar el contenido final del Job Summary (opcional) ---
+        # echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
+        # cat "$GITHUB_STEP_SUMMARY"
+        # echo "-------------------------------------------------"
 
 
     # 7) Subir todos los JSON generados como un artefacto del workflow
