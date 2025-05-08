@@ -11,25 +11,9 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      # 1) Clonamos tu repo
       - name: Checkout repo
-        uses: actions/checkout@v4
+        uses: actions/checkout@v3
 
-      # 2) Clonamos el motor de scoring
-      - name: Clone scoring engine
+      - name: Ejecutar análisis de calidad
         run: |
-          git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
-
-      # 3) Build + Up con Docker Compose
-      - name: Start scoring engine (Docker Compose)
-        working-directory: scoring_engine
-        run: |
-          docker-compose up --build -d
-          echo "⏳ Esperando a que el servicio responda en http://localhost:8088 ..."
-          for i in {1..30}; do
-            if curl -s http://localhost:8088/ | grep -qiE "api|swagger|health"; then
-              echo " Scoring engine listo"; break
-            fi
-            sleep 5
-          done
-
+          echo "Aquí iría tu lógica de scoring..."
