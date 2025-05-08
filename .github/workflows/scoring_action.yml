@@ -16,4 +16,4 @@ jobs:
 
       - name: Ejecutar análisis de calidad
         run: |
-          echo "Aquí iría tu lógica de scoring..."
+          echo "Aquí iría tu lógica de scoring.."
