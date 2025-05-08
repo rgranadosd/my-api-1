@@ -1,4 +1,4 @@
-name: Importar APIs
+name: Importar
 
 on:
   push:
