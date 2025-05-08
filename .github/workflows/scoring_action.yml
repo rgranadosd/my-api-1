@@ -2,7 +2,7 @@ name: API Scoring
 
 on:
   workflow_run:
-    workflows: ["Importar"]        # debe coincidir EXACTAMENTE con el name: del flujo padre
+    workflows: ["Importar"]
     types: [completed]
 
 jobs:
@@ -11,75 +11,71 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    # 1) Código fuente del repo
-    - name: Checkout repo
-      uses: actions/checkout@v3
+    # 1. Checkout
+    - uses: actions/checkout@v3
 
-    # 2) Clonar el motor de scoring
+    # 2. Clonar engine
     - name: Clone scoring engine
       run: git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
 
-    # 3) Wrapper opcional para docker-compose (runners con Compose v2)
-    - name: Habilitar docker-compose (wrapper para Compose v2)
+    # 3. Wrapper docker-compose (runners con Compose v2)
+    - name: Habilitar docker-compose
       run: |
         if ! command -v docker-compose &>/dev/null; then
-          echo '#!/usr/bin/env bash'      | sudo tee  /usr/local/bin/docker-compose
-          echo 'exec docker compose "$@"' | sudo tee -a /usr/local/bin/docker-compose
+          printf '#!/usr/bin/env bash\nexec docker compose "$@"\n' | \
+            sudo tee /usr/local/bin/docker-compose >/dev/null
           sudo chmod +x /usr/local/bin/docker-compose
         fi
 
-    # 4) Arrancar el contenedor de scoring
-    - name: Start scoring engine (Docker Compose)
+    # 4. Arrancar contenedor  ─ espera solo a que /health devuelva 200
+    - name: Start scoring engine
       working-directory: scoring_engine
       run: |
         docker-compose up --build -d
-        echo "⏳ Esperando a que el servicio responda en http://localhost:8088 ..."
+        echo "⏳ Esperando a que /health devuelva 200..."
         for i in {1..30}; do
-          if curl -s http://localhost:8088/health | grep -qi '"status":"UP"'; then
-            echo "✅ Scoring engine listo"; exit 0; fi
+          if curl -sf http://localhost:8088/health >/dev/null; then
+            echo "✅ Scoring engine listo"; break; fi
           sleep 5
+          [ $i -eq 30 ] && { echo "::error::Timeout"; docker-compose logs; exit 1; }
         done
-        echo "::error::Scoring engine no respondió a tiempo"; docker-compose logs; exit 1
 
-    # 5) Localizar todos los apis/**/api.yaml del repo
+    # 5. Localizar todas las specs apis/**/api.yaml
     - name: Localizar especificaciones
       id: specs
       run: |
         mapfile -t SPEC_FILES < <(git ls-files 'apis/**/api.yaml')
-        if [ ${#SPEC_FILES[@]} -eq 0 ]; then
-          echo "::error::No se encontró ningún apis/**/api.yaml"; exit 1
-        fi
-        printf '%s\n' "${SPEC_FILES[@]}"
+        [ ${#SPEC_FILES[@]} -eq 0 ] && { echo "::error::Sin api.yaml"; exit 1; }
         { echo 'specs<<EOF'; printf '%s\n' "${SPEC_FILES[@]}"; echo 'EOF'; } >> "$GITHUB_OUTPUT"
 
-    # 6) Enviar cada api.yaml al motor y guardar resultados
+    # 6. Enviar cada spec al endpoint con apiProtocol=REST
     - name: Calcular scoring
-      id: score
       run: |
         IFS=$'\n' read -d '' -r -a SPECS <<<"${{ steps.specs.outputs.specs }}"
         mkdir -p scores
-        echo "### Resultados de scoring" >> "$GITHUB_STEP_SUMMARY"
+        echo "### Resultados" >> "$GITHUB_STEP_SUMMARY"
         for spec in "${SPECS[@]}"; do
           api=$(basename "$(dirname "$(dirname "$spec")")")
           ver=$(basename "$(dirname "$spec")")
           out="scores/${api}_${ver}.json"
-          echo "⏩ Scoring $spec → $out"
-          curl --fail -s -X POST -F "file=@${spec};type=text/yaml" \
-               http://localhost:8088/apifirst/v1/apis/score-file \
-               -o "$out"
+          curl --fail -s \
+            -X POST \
+            -F "file=@${spec};type=text/yaml" \
+            -F "apiProtocol=REST" \
+            http://localhost:8088/apifirst/v1/apis/score-file \
+            -o "$out"
           grade=$(jq -r '.overallGrade // .grade // "?"' "$out")
           echo "• **${api} ${ver}** → ${grade}" >> "$GITHUB_STEP_SUMMARY"
         done
 
-    # 7) Subir todos los JSON como artefacto
-    - name: Upload scores
-      uses: actions/upload-artifact@v4
+    # 7. Artefacto con todos los JSON
+    - uses: actions/upload-artifact@v4
       with:
         name: api-scores
         path: scores/
 
-    # 8) Apagar y limpiar el contenedor, pase lo que pase
-    - name: Tear-down scoring engine
+    # 8. Limpieza
+    - name: Tear-down
       if: always()
       working-directory: scoring_engine
       run: docker-compose down
