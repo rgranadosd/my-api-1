@@ -14,6 +14,6 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Ejecutar análisis de calidad
+      - name: Clone scoring engine
         run: |
-          echo "Aquí iría tu lógica de scoring.."
+          git clone --depth 1 https://github.com/rgranadosd/api-scoring-engine.git scoring_engine
