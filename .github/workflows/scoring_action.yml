@@ -66,17 +66,24 @@ jobs:
         mapfile -t SPECS <<<"${{ steps.specs.outputs.specs }}"
         mkdir -p scores
 
+        # Cabecera del resumen con la nueva columna 'Score'
         {
           echo "## Resultados de calidad de las APIs"
           echo
-          echo "| API | Módulo | Nota |"
-          echo "|-----|--------|------|"
+          echo "| API | Módulo | Nota | Score |" # Nueva columna Score
+          echo "|-----|--------|------|-------|"
         } >> "$GITHUB_STEP_SUMMARY"
 
+        # Función auxiliar de shell para colorear celdas según la nota
         color () {
-          [[ "$1" =~ ^([A]|B($|\+)) ]] \
-            && printf "<span style='color:#22863a;font-weight:bold;'>%s</span>" "$1" \
-            || printf "<span style='color:#d91e18;font-weight:bold;'>%s</span>" "$1"
+          local grade="$1"
+          if [[ "$grade" =~ ^A(\+|$) ]]; then # A o A+ (Verde)
+            printf "<span style='color:#22863a;font-weight:bold;'>%s</span>" "$grade"
+          elif [[ "$grade" == "B" ]]; then # B (Amarillo/Dorado)
+            printf "<span style='color:#FFD700;font-weight:bold;'>%s</span>" "$grade"
+          else # Cualquier otra cosa (Rojo)
+            printf "<span style='color:#d91e18;font-weight:bold;'>%s</span>" "$grade"
+          fi
         }
 
         for spec in "${SPECS[@]}"; do
@@ -93,57 +100,55 @@ jobs:
             http://localhost:8088/apifirst/v1/apis/score-file \
             -o "$out" || { echo "::warning::Curl failed for ${spec}. Check logs for details."; cat "$out" 2>/dev/null; true; }
 
-          # --- DEBUG: Mostrar el contenido del archivo JSON generado ---
-          echo "--- DEBUG: Contenido de $out ---"
-          if [ -s "$out" ]; then
-             cat "$out"
-          else
-             echo "El archivo $out está vacío o no se creó."
-          fi
-          echo "-----------------------------------"
+          # --- DEBUG: Mostrar el contenido del archivo JSON (opcional, comentar si no se necesita) ---
+          # echo "--- DEBUG: Contenido de $out ---"
+          # if [ -s "$out" ]; then cat "$out"; else echo "El archivo $out está vacío o no se creó."; fi
+          # echo "-----------------------------------"
 
           # ─── Procesar y añadir la Fila Overall al resumen ───
-          # *** CORRECCIÓN: Usar .overallRating en lugar de .overallGrade/.grade ***
-          overall=$(jq -r '.overallRating // "?"' "$out")
-          echo "--- DEBUG: Overall grade for ${spec}: ${overall} ---"
-          echo "| ${api} ${ver} | **Overall** | $(color "$overall") |" >> "$GITHUB_STEP_SUMMARY"
+          # Extraer Overall Rating y Overall Score
+          # Usamos @tsv para obtener Rating y Score separados por tabulador
+          read -r overall_rating overall_score <<< $(jq -r '[.overallRating // "?", (.overallScore | tostring) // "-"] | @tsv' "$out")
+
+          # Añadir la fila Overall a la tabla del resumen
+          echo "| ${api} ${ver} | **Overall** | $(color "$overall_rating") | ${overall_score} |" >> "$GITHUB_STEP_SUMMARY"
 
           # ─── Recorrer módulos específicos (Design, Security, Documentation) y añadirlos al resumen ───
-          # *** CORRECCIÓN: Adaptar jq para extraer ratings específicos del nivel superior ***
-          echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
+          # Adaptar jq para extraer Ratings y Scores específicos del nivel superior
           JQ_MODULE_OUTPUT=$(jq -r '
-            # Creamos un objeto con los nombres de "módulos" y sus ratings correspondientes
-            {
-              "Design": .designRating,
-              "Security": .securityRating,
-              "Documentation": .documentationRating
-            }
-            # Convertimos el objeto a un array de pares [clave, valor]
-            | to_entries
-            # Mapeamos cada par a una cadena "clave\tvalor"
-            | map("\(.key)\t\(.value // "?")") # Usamos // "?" por si algún rating falta
+            # Creamos un array con objetos para cada "módulo", incluyendo nombre, rating y score
+            [
+              {"name": "Design", "rating": .designRating, "score": .designScore},
+              {"name": "Security", "rating": .securityRating, "score": .securityScore},
+              {"name": "Documentation", "rating": .documentationRating, "score": .documentationScore}
+            ]
+            # Convertimos cada objeto a una cadena "NombreMódulo\tRating\tScore"
+            | map("\(.name)\t\(.rating // "?")\t\((.score | tostring) // "-")") # Convertir score a string
             # Imprimimos cada cadena como una línea separada
             | .[]
           ' "$out")
-          echo "$JQ_MODULE_OUTPUT"
-          echo "---------------------------------------------"
 
-          # Procesar la salida de jq y añadir filas por módulo al resumen
-          echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod grade; do
-              # Solo añadir la fila si hemos podido extraer tanto el módulo como la nota
-              if [ -n "$mod" ] && [ -n "$grade" ]; then
-                echo "| ${api} ${ver} | ${mod} | $(color "$grade") |" >> "$GITHUB_STEP_SUMMARY"
-                echo "--- DEBUG: Added module row for ${mod} with grade ${grade} ---"
-              else
-                echo "--- DEBUG: Skipping empty or incomplete module row (mod: '${mod}', grade: '${grade}') ---"
+          # --- DEBUG: Mostrar la salida de jq para módulos (opcional, comentar si no se necesita) ---
+          # echo "--- DEBUG: Salida de jq para módulos específicos desde $out ---"
+          # echo "$JQ_MODULE_OUTPUT"
+          # echo "---------------------------------------------"
+
+          # Procesar la salida de jq (NombreMódulo\tRating\tScore) y añadir filas al resumen
+          echo "$JQ_MODULE_OUTPUT" | while IFS=$'\t' read -r mod rating score; do
+              # Solo añadir la fila si hemos podido extraer el módulo, rating y score (o al menos módulo y rating)
+              if [ -n "$mod" ] && [ -n "$rating" ]; then
+                echo "| ${api} ${ver} | ${mod} | $(color "$rating") | ${score:- -} |" >> "$GITHUB_STEP_SUMMARY" # Usar ${score:- -} para mostrar '-' si score está vacío
+                # echo "--- DEBUG: Added module row for ${mod} with rating ${rating} and score ${score:- -} ---" # DEBUG opcional
+              # else
+                # echo "--- DEBUG: Skipping empty or incomplete module row (mod: '${mod}', rating: '${rating}', score: '${score:- -}') ---" # DEBUG opcional
               fi
           done
         done
 
-        # --- DEBUG: Mostrar el contenido final del Job Summary ---
-        echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
-        cat "$GITHUB_STEP_SUMMARY"
-        echo "-------------------------------------------------"
+        # --- DEBUG: Mostrar el contenido final del Job Summary (opcional, comentar si no se necesita) ---
+        # echo "--- DEBUG: Contenido final de \$GITHUB_STEP_SUMMARY ---"
+        # cat "$GITHUB_STEP_SUMMARY"
+        # echo "-------------------------------------------------"
 
     # 7) Subir todos los JSON generados como un artefacto del workflow
     - name: Upload scores
